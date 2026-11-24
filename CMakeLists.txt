@@ -238,6 +238,10 @@ if(PBRT_HIPRT)
   list(APPEND PBRT_LINK_FLAGS "--hip-link")
   list(APPEND PBRT_LINK_FLAGS "-Xoffload-linker")
   list(APPEND PBRT_LINK_FLAGS "--whole-archive")
+  # Work around llvm/llvm-project#224205: long branches in a function bigger than the s_branch
+  # range clobber its return address s[30:31], so LayeredBxDF<DielectricBxDF, ConductorBxDF>::f
+  # (coatedconductor, e.g. bmw-m6) returned into itself and hung; factor 0 picks a dead SGPR pair
+  list(APPEND PBRT_LINK_FLAGS "SHELL:-mllvm -amdgpu-long-branch-factor=0")
   set(PBRT_HIP_ENABLED ON)
   file(GLOB PBRT_HIPRT_FATBINS ${PBRT_HIPRT_BINARY_PATH}/*.hipfb)
   file(COPY ${PBRT_HIPRT_FATBINS} DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
