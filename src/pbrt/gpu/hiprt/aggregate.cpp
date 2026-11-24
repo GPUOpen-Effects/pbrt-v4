@@ -26,6 +26,12 @@
 #include <mutex>
 #include <unordered_map>
 
+#include <filesystem>
+#include <iostream>
+#include <string>
+#include <limits.h>
+#include <unistd.h>
+
 #include <hiprt/hiprt.h>
 
 #define HIPRT_CHECK(EXPR)                                                    \
@@ -41,6 +47,21 @@ STAT_MEMORY_COUNTER("Memory/Acceleration structures", gpuBVHBytes);
 STAT_COUNTER("Geometry/Triangles added from displacement mapping", displacedTrisDelta);
 STAT_COUNTER("Geometry/Curves", nCurves);
 STAT_COUNTER("Geometry/Bilinear patches created for diced curves", nBLPsForCurves);
+
+std::string get_pbrt_directory()
+{
+  
+#if defined(WIN32)
+    // TODO: Need to find a solution for Windows. 
+    // For now we assume the the pbrt executable is in the current working directory.
+    return "./";
+#else
+  char result[ PATH_MAX ];
+  ssize_t count = readlink( "/proc/self/exe", result, PATH_MAX );
+  std::string pbrt_path = std::string( result, (count > 0) ? count : 0 );
+  return std::filesystem::path(pbrt_path).parent_path().string();
+#endif
+}
 
 static Material getMaterial(const ShapeSceneEntity &shape,
                             const std::map<std::string, Material> &namedMaterials,
@@ -1443,12 +1464,14 @@ static void loadFile(const std::string& path, std::vector<char> &dst) {
 }
 
 HiprtAggregate::Module HiprtAggregate::compileHiprtModule(hiprtContext context) {
+    const std::string pbrt_directory = get_pbrt_directory();
     const std::string path = "../src/pbrt/gpu/hiprt/hiprt.cu";
     const std::string closestFunction = "__raygen__findClosest";
     const std::string shadowFunction = "__raygen__shadow";
     const std::string shadowTrFunction = "__raygen__shadow_Tr";
     const std::string oneRandomFunction = "__raygen__randomHit";
-    const std::string binFilename = "hiprt.hipfb";
+    // The hiprt.hipfb file needs to be stored next to the pbrt executable
+    const std::string binFilename = pbrt_directory + "/" + "hiprt.hipfb";
 
     std::vector<char> binary;
     loadFile(binFilename, binary);
