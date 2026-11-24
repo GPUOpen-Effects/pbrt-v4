@@ -1065,6 +1065,12 @@ target_link_libraries(pbrt_exe PRIVATE ${ALL_PBRT_LIBS} pbrt_opt pbrt_warnings)
 
 set_target_properties(pbrt_exe PROPERTIES OUTPUT_NAME pbrt)
 
+set_target_properties(
+    pbrt_exe
+    PROPERTIES 
+    INSTALL_RPATH 
+    "$ORIGIN;$ORIGIN/../lib;$ORIGIN/../bin")
+
 add_sanitizers(pbrt_exe)
 
 set_property(TARGET pbrt_exe PROPERTY FOLDER "cmd")
