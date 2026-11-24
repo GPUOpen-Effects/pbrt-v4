@@ -22,6 +22,7 @@ list(INSERT CMAKE_MODULE_PATH 0 "${CMAKE_SOURCE_DIR}/cmake")
 # Configuration options
 
 option(PBRT_HIPRT "Use HIPRT as backend" OFF)
+set(PBRT_ROCM_VERSION "7.1" CACHE STRING "ROCM version (e.g., 7.1)")
 option(PBRT_FLOAT_AS_DOUBLE "Use 64-bit floats" OFF)
 option(PBRT_BUILD_NATIVE_EXECUTABLE "Build executable optimized for CPU architecture of system pbrt was built on" ON)
 option(PBRT_DBG_LOGGING "Enable (very verbose!) debug logging" OFF)
@@ -986,11 +987,17 @@ if(PBRT_CUDA_ENABLED)
 endif()
 
 if(PBRT_HIP_ENABLED)
+  if(WIN32)
+    configure_file(scripts/hiprt.bat.in ${CMAKE_CURRENT_BINARY_DIR}/hiprt.bat @ONLY)
+  else()
+    configure_file(scripts/hiprt.sh.in ${CMAKE_CURRENT_BINARY_DIR}/hiprt.sh @ONLY)
+  endif()
+
   list(APPEND ALL_PBRT_LIBS "hiprt${PBRT_HIPRT_VERSION}64")
   if(CMAKE_SYSTEM_NAME STREQUAL Windows)
     add_custom_target(
         libdeflate_msvc_patch
-        COMMAND cd ${CMAKE_CURRENT_SOURCE_DIR}/src/ext/libdeflate && git apply ${CMAKE_CURRENT_BINARY_DIR}/0001-MSVC-HIP.patch > nul 2> nul & exit 0
+        COMMAND cd ${CMAKE_CURRENT_SOURCE_DIR}/src/ext/libdeflate && git apply ${CMAKE_CURRENT_SOURCE_DIR}/scripts/0001-MSVC-HIP.patch > nul 2> nul & exit 0
     )
     add_dependencies(pbrt_lib libdeflate_msvc_patch)
     add_dependencies(deflate libdeflate_msvc_patch)
