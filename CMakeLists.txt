@@ -229,11 +229,20 @@ if(PBRT_HIPRT)
   list(APPEND PBRT_DEFINITIONS "PBRT_BUILD_GPU_RENDERER")
   list(APPEND PBRT_DEFINITIONS "__HIP_PLATFORM_AMD__")
   list(APPEND PBRT_DEFINITIONS "GTEST_HAS_SEH=0")
+  if(WIN32)
+    # The MSVC STL's vectorized algorithms (e.g. behind std::max(initializer_list))
+    # are host-only, so they break the same std calls in HIP device code
+    list(APPEND PBRT_DEFINITIONS "_USE_STD_VECTOR_ALGORITHMS=0")
+  endif()
   list(APPEND PBRT_CXX_FLAGS "-std=c++17")
   list(APPEND PBRT_CXX_FLAGS "-fgpu-rdc")
   list(APPEND PBRT_LINK_FLAGS "-fgpu-rdc")
   if (WIN32)
 	  list (APPEND PBRT_LINK_FLAGS "-fuse-ld=lld")
+	  # CMake 4 appends -fuse-ld=lld-link to clang links, which overrides the flag above
+	  # and breaks the HIP device link; lld still means lld-link for the host link
+	  set(CMAKE_C_USING_LINKER_DEFAULT "-fuse-ld=lld")
+	  set(CMAKE_CXX_USING_LINKER_DEFAULT "-fuse-ld=lld")
 	endif()
   list(APPEND PBRT_LINK_FLAGS "--hip-link")
   list(APPEND PBRT_LINK_FLAGS "-Xoffload-linker")
@@ -984,6 +993,7 @@ if(PBRT_HIP_ENABLED)
         COMMAND cd ${CMAKE_CURRENT_SOURCE_DIR}/src/ext/libdeflate && git apply ${CMAKE_CURRENT_BINARY_DIR}/0001-MSVC-HIP.patch > nul 2> nul & exit 0
     )
     add_dependencies(pbrt_lib libdeflate_msvc_patch)
+    add_dependencies(deflate libdeflate_msvc_patch)
 	  message(STATUS "Applying patch to libdeflate to support _BitScanReverse for Windows HIP build.")
     add_custom_target(
       hiprt_kernels ALL
