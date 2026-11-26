@@ -29,8 +29,10 @@
 #include <filesystem>
 #include <iostream>
 #include <string>
+#if !defined(PBRT_IS_WINDOWS)
 #include <limits.h>
 #include <unistd.h>
+#endif
 
 #include <hiprt/hiprt.h>
 
@@ -51,8 +53,8 @@ STAT_COUNTER("Geometry/Bilinear patches created for diced curves", nBLPsForCurve
 std::string get_pbrt_directory()
 {
   
-#if defined(WIN32)
-    // TODO: Need to find a solution for Windows. 
+#if defined(PBRT_IS_WINDOWS)
+    // TODO: Need to find a solution for Windows.
     // For now we assume the the pbrt executable is in the current working directory.
     return "./";
 #else
