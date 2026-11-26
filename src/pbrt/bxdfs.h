@@ -91,7 +91,13 @@ class DiffuseTransmissionBxDF {
 
     PBRT_CPU_GPU
     SampledSpectrum f(Vector3f wo, Vector3f wi, TransportMode mode) const {
-        return SameHemisphere(wo, wi) ? (R * InvPi) : (T * InvPi);
+        // Blend by value instead of choosing between R and T: with ROCm 10.2's
+        // compiler the conditional becomes a select between the addresses of the
+        // two members in private memory, and SIFoldOperands folds the address of
+        // T to a flat pointer without its aperture half, which faults when read.
+        // R and T are in [0, 1], so the blend is exact.
+        Float w = SameHemisphere(wo, wi) ? Float(1) : Float(0);
+        return (w * R + (1 - w) * T) * InvPi;
     }
 
     PBRT_CPU_GPU

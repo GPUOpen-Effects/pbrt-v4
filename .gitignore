@@ -2,8 +2,8 @@
 .#*
 #*#
 src/build
-src/ext/hiprtSdk/hiprt
 .DS_Store
 .ipynb_checkpoints/
 build/
+install/
 .cache/

@@ -195,30 +195,64 @@ if(PBRT_HIPRT)
 
   set(CUDA_COMPILE_LANGUAGE CXX)
 
-  set(PBRT_HIPRT_PATH "src/ext/hiprtSdk")
-  if(WIN32)
-    set(PBRT_HIPRT_BINARY_PATH ${PBRT_HIPRT_PATH}/hiprt/win)
-  else()
-    set(PBRT_HIPRT_BINARY_PATH ${PBRT_HIPRT_PATH}/hiprt/linux64)
+  # HIPRT is built in its submodule (see README.md); the build generates hiprt/hiprt.h
+  # there and puts the library, kernels, and bitcode into dist/bin/Release
+  set(PBRT_HIPRT_PATH "${CMAKE_CURRENT_SOURCE_DIR}/src/ext/hiprt")
+  set(PBRT_HIPRT_BINARY_PATH ${PBRT_HIPRT_PATH}/dist/bin/Release)
+  if(NOT EXISTS ${PBRT_HIPRT_PATH}/version.txt)
+    message(FATAL_ERROR "The HIPRT submodule is missing. Run:\n" "  \"git submodule update --init src/ext/hiprt\"")
   endif()
+  # Version 3.2 -> "03002", as in hiprt0300264.dll and hiprt03002_6.4_amd_lib_win.bc
+  file(STRINGS ${PBRT_HIPRT_PATH}/version.txt PBRT_HIPRT_VERSION_LINES)
+  list(GET PBRT_HIPRT_VERSION_LINES 0 PBRT_HIPRT_VERSION_MAJOR)
+  list(GET PBRT_HIPRT_VERSION_LINES 1 PBRT_HIPRT_VERSION_MINOR)
+  math(EXPR PBRT_HIPRT_VERSION "${PBRT_HIPRT_VERSION_MAJOR} * 1000 + ${PBRT_HIPRT_VERSION_MINOR}")
+  if(PBRT_HIPRT_VERSION LESS 10000)
+    set(PBRT_HIPRT_VERSION "0${PBRT_HIPRT_VERSION}")
+  endif()
+  if(WIN32)
+    set(PBRT_HIPRT_OS win)
+  else()
+    set(PBRT_HIPRT_OS linux)
+  endif()
+  # Device library the HIPRT kernels are linked with; its name includes the HIP SDK
+  # version, so it is copied under a fixed name for hiprt.bat/hiprt.sh
+  file(GLOB PBRT_HIPRT_BITCODE ${PBRT_HIPRT_BINARY_PATH}/hiprt${PBRT_HIPRT_VERSION}_*_amd_lib_${PBRT_HIPRT_OS}.bc)
+  list(LENGTH PBRT_HIPRT_BITCODE PBRT_HIPRT_BITCODE_COUNT)
+  if(NOT EXISTS ${PBRT_HIPRT_PATH}/hiprt/hiprt.h OR NOT PBRT_HIPRT_BITCODE_COUNT EQUAL 1)
+    message(FATAL_ERROR "Expected exactly one HIPRT ${PBRT_HIPRT_VERSION_MAJOR}.${PBRT_HIPRT_VERSION_MINOR} build with bitcode in ${PBRT_HIPRT_BINARY_PATH}. "
+                        "Build HIPRT first, see \"Instructions to build the HIP port\" in README.md.")
+  endif()
+  configure_file(${PBRT_HIPRT_BITCODE} ${CMAKE_CURRENT_BINARY_DIR}/hiprt_amd_lib.bc COPYONLY)
   link_directories(${PBRT_HIPRT_BINARY_PATH})
   include_directories(${PBRT_HIPRT_PATH})
   list(APPEND PBRT_DEFINITIONS "PBRT_BUILD_GPU_RENDERER")
   list(APPEND PBRT_DEFINITIONS "__HIP_PLATFORM_AMD__")
   list(APPEND PBRT_DEFINITIONS "GTEST_HAS_SEH=0")
+  if(WIN32)
+    # The MSVC STL's vectorized algorithms (e.g. behind std::max(initializer_list))
+    # are host-only, so they break the same std calls in HIP device code
+    list(APPEND PBRT_DEFINITIONS "_USE_STD_VECTOR_ALGORITHMS=0")
+  endif()
   list(APPEND PBRT_CXX_FLAGS "-std=c++17")
   list(APPEND PBRT_CXX_FLAGS "-fgpu-rdc")
   list(APPEND PBRT_LINK_FLAGS "-fgpu-rdc")
   if (WIN32)
 	  list (APPEND PBRT_LINK_FLAGS "-fuse-ld=lld")
+	  # CMake 4 appends -fuse-ld=lld-link to clang links, which overrides the flag above
+	  # and breaks the HIP device link; lld still means lld-link for the host link
+	  set(CMAKE_C_USING_LINKER_DEFAULT "-fuse-ld=lld")
+	  set(CMAKE_CXX_USING_LINKER_DEFAULT "-fuse-ld=lld")
 	endif()
   list(APPEND PBRT_LINK_FLAGS "--hip-link")
   list(APPEND PBRT_LINK_FLAGS "-Xoffload-linker")
   list(APPEND PBRT_LINK_FLAGS "--whole-archive")
+  # Work around llvm/llvm-project#224205: long branches in a function bigger than the s_branch
+  # range clobber its return address s[30:31], so LayeredBxDF<DielectricBxDF, ConductorBxDF>::f
+  # (coatedconductor, e.g. bmw-m6) returned into itself and hung; factor 0 picks a dead SGPR pair
+  list(APPEND PBRT_LINK_FLAGS "SHELL:-mllvm -amdgpu-long-branch-factor=0")
   set(PBRT_HIP_ENABLED ON)
-  file(GLOB PBRT_HIPRT_BITCODES ${PBRT_HIPRT_BINARY_PATH}/*.bc)
   file(GLOB PBRT_HIPRT_FATBINS ${PBRT_HIPRT_BINARY_PATH}/*.hipfb)
-  file(COPY ${PBRT_HIPRT_BITCODES} DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
   file(COPY ${PBRT_HIPRT_FATBINS} DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
   if(WIN32)
     file(GLOB PBRT_HIPRT_DLLS ${PBRT_HIPRT_BINARY_PATH}/*.dll)
@@ -952,13 +986,23 @@ if(PBRT_CUDA_ENABLED)
 endif()
 
 if(PBRT_HIP_ENABLED)
-  list(APPEND ALL_PBRT_LIBS "hiprt0200264")
+  # hiprt.sh/hiprt.bat compile the HIPRT kernels for the same GPUs as the rest of pbrt
+  list(TRANSFORM GPU_TARGETS PREPEND "--offload-arch=" OUTPUT_VARIABLE PBRT_HIPRT_OFFLOAD_ARCHS)
+  list(JOIN PBRT_HIPRT_OFFLOAD_ARCHS " " PBRT_HIPRT_OFFLOAD_ARCHS)
+  if(WIN32)
+    configure_file(scripts/hiprt.bat.in ${CMAKE_CURRENT_BINARY_DIR}/hiprt.bat @ONLY)
+  else()
+    configure_file(scripts/hiprt.sh.in ${CMAKE_CURRENT_BINARY_DIR}/hiprt.sh @ONLY)
+  endif()
+
+  list(APPEND ALL_PBRT_LIBS "hiprt${PBRT_HIPRT_VERSION}64")
   if(CMAKE_SYSTEM_NAME STREQUAL Windows)
     add_custom_target(
         libdeflate_msvc_patch
-        COMMAND cd ${CMAKE_CURRENT_SOURCE_DIR}/src/ext/libdeflate && git apply ${CMAKE_CURRENT_BINARY_DIR}/0001-MSVC-HIP.patch > nul 2> nul & exit 0
+        COMMAND cd ${CMAKE_CURRENT_SOURCE_DIR}/src/ext/libdeflate && git apply ${CMAKE_CURRENT_SOURCE_DIR}/scripts/0001-MSVC-HIP.patch > nul 2> nul & exit 0
     )
     add_dependencies(pbrt_lib libdeflate_msvc_patch)
+    add_dependencies(deflate libdeflate_msvc_patch)
 	  message(STATUS "Applying patch to libdeflate to support _BitScanReverse for Windows HIP build.")
     add_custom_target(
       hiprt_kernels ALL
@@ -1029,6 +1073,12 @@ target_include_directories(pbrt_exe PRIVATE src src/ext)
 target_link_libraries(pbrt_exe PRIVATE ${ALL_PBRT_LIBS} pbrt_opt pbrt_warnings)
 
 set_target_properties(pbrt_exe PROPERTIES OUTPUT_NAME pbrt)
+
+set_target_properties(
+    pbrt_exe
+    PROPERTIES 
+    INSTALL_RPATH 
+    "$ORIGIN;$ORIGIN/../lib;$ORIGIN/../bin")
 
 add_sanitizers(pbrt_exe)
 

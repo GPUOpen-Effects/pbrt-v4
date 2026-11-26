@@ -48,13 +48,15 @@ template <typename... Args>
 PBRT_CPU_GPU inline void LogFatal(LogLevel level, const char *file, int line,
                                   const char *fmt, Args &&...args);
 
-#ifndef __HIP_PLATFORM_AMD__
+// Must be declared for HIP too: without it, the LogFatal template above resolves its
+// own LogFatal(level, file, line, fmt) call to itself, and the compiler drops the
+// infinitely recursive (hence unreachable) fatal path, so CUDA_CHECK failures neither
+// print nor abort cleanly
 PBRT_CPU_GPU void LogFatal(LogLevel level, const char *file, int line, const char *s);
 
 template <typename... Args>
 PBRT_CPU_GPU inline void Log(LogLevel level, const char *file, int line, const char *fmt,
                              Args &&...args);
-#endif
 
 #define TO_STRING(x) TO_STRING2(x)
 #define TO_STRING2(x) #x
@@ -128,7 +130,7 @@ PBRT_CPU_GPU inline void Log(LogLevel level, const char *file, int line, const c
 template <typename... Args>
 PBRT_CPU_GPU inline void LogFatal(LogLevel level, const char *file, int line,
                                   const char *fmt, Args &&...args) {
-#if defined(PBRT_IS_GPU_CODE) || defined(__HIP_PLATFORM_AMD__)
+#if defined(PBRT_IS_GPU_CODE)
     LogFatal(level, file, line, fmt);  // just the format string #yolo
 #else
     std::string s = StringPrintf(fmt, std::forward<Args>(args)...);

@@ -26,6 +26,14 @@
 #include <mutex>
 #include <unordered_map>
 
+#include <filesystem>
+#include <iostream>
+#include <string>
+#if !defined(PBRT_IS_WINDOWS)
+#include <limits.h>
+#include <unistd.h>
+#endif
+
 #include <hiprt/hiprt.h>
 
 #define HIPRT_CHECK(EXPR)                                                    \
@@ -41,6 +49,21 @@ STAT_MEMORY_COUNTER("Memory/Acceleration structures", gpuBVHBytes);
 STAT_COUNTER("Geometry/Triangles added from displacement mapping", displacedTrisDelta);
 STAT_COUNTER("Geometry/Curves", nCurves);
 STAT_COUNTER("Geometry/Bilinear patches created for diced curves", nBLPsForCurves);
+
+std::string get_pbrt_directory()
+{
+  
+#if defined(PBRT_IS_WINDOWS)
+    // TODO: Need to find a solution for Windows.
+    // For now we assume the the pbrt executable is in the current working directory.
+    return "./";
+#else
+  char result[ PATH_MAX ];
+  ssize_t count = readlink( "/proc/self/exe", result, PATH_MAX );
+  std::string pbrt_path = std::string( result, (count > 0) ? count : 0 );
+  return std::filesystem::path(pbrt_path).parent_path().string();
+#endif
+}
 
 static Material getMaterial(const ShapeSceneEntity &shape,
                             const std::map<std::string, Material> &namedMaterials,
@@ -160,7 +183,7 @@ HiprtAggregate::HiprtAggregate(
     HIPRT_CHECK(hiprtCreateContext(HIPRT_API_VERSION, ctxInput, context));
 
 #ifdef NDEBUG
-    hiprtSetLogLevel(hiprtLogLevelError);
+    HIPRT_CHECK(hiprtSetLogLevel(context, hiprtLogLevelError));
 #endif
     LOG_VERBOSE("HIPRT version %d.%d.%x successfully initialized", HIPRT_MAJOR_VERSION,
                 HIPRT_MINOR_VERSION, HIPRT_PATCH_VERSION);
@@ -326,13 +349,6 @@ HiprtAggregate::HiprtAggregate(
     HIPRT_CHECK(
         hiprtCreateGlobalStackBuffer(context, stackBufferInput, globalStackBuffer));
 
-    constexpr uint32_t InstanceStackSize = 1;
-    hiprtGlobalStackBufferInput instanceStackBufferInput{
-        hiprtStackTypeGlobal, hiprtStackEntryTypeInstance, InstanceStackSize,
-        (uint32_t)maxQueueSize};
-    HIPRT_CHECK(hiprtCreateGlobalStackBuffer(context, instanceStackBufferInput,
-                                             globalInstanceStackBuffer));
-
 #if defined(PBRT_IS_WINDOWS)
     if (Options->useGPU)
         ReenableThreadPool();
@@ -362,7 +378,6 @@ void HiprtAggregate::IntersectClosest(int maxRays, const RayQueue *rayQueue,
         params.universalEvalMaterialQueue = universalEvalMaterialQueue;
         params.mediumSampleQueue = mediumSampleQueue;
         params.globalStackBuffer = globalStackBuffer;
-        params.globalInstanceStackBuffer = globalInstanceStackBuffer;
         params.funcTable = module.funcTable;
         params.hgRecords = hgRecords;
         params.offsets = offsets;
@@ -405,7 +420,6 @@ void HiprtAggregate::IntersectShadow(int maxRays, ShadowRayQueue *shadowRayQueue
         params.shadowRayQueue = shadowRayQueue;
         params.pixelSampleState = *pixelSampleState;
         params.globalStackBuffer = globalStackBuffer;
-        params.globalInstanceStackBuffer = globalInstanceStackBuffer;
         params.funcTable = module.funcTable;
         params.hgRecords = hgRecords;
         params.offsets = offsets;
@@ -448,7 +462,6 @@ void HiprtAggregate::IntersectShadowTr(int maxRays, ShadowRayQueue *shadowRayQue
         params.shadowRayQueue = shadowRayQueue;
         params.pixelSampleState = *pixelSampleState;
         params.globalStackBuffer = globalStackBuffer;
-        params.globalInstanceStackBuffer = globalInstanceStackBuffer;
         params.funcTable = module.funcTable;
         params.hgRecords = hgRecords;
         params.offsets = offsets;
@@ -490,7 +503,6 @@ void HiprtAggregate::IntersectOneRandom(
         params.traversable = scene;
         params.subsurfaceScatterQueue = subsurfaceScatterQueue;
         params.globalStackBuffer = globalStackBuffer;
-        params.globalInstanceStackBuffer = globalInstanceStackBuffer;
         params.funcTable = module.funcTable;
         params.hgRecords = hgRecords;
         params.offsets = offsets;
@@ -1191,12 +1203,10 @@ HiprtAggregate::GeometryContainer HiprtAggregate::buildBVHForBLPs(
             for (int i = 0; i < 4; ++i)
                 patchBounds =
                     Union(patchBounds, mesh->p[mesh->vertexIndices[4 * patchIndex + i]]);
-            hiprtFloat4 aabbMin =
-                make_hiprtFloat4(float(patchBounds.pMin.x), float(patchBounds.pMin.y),
-                                 float(patchBounds.pMin.z), 0.0f);
-            hiprtFloat4 aabbMax =
-                make_hiprtFloat4(float(patchBounds.pMax.x), float(patchBounds.pMax.y),
-                                 float(patchBounds.pMax.z), 0.0f);
+            hiprtFloat4 aabbMin{float(patchBounds.pMin.x), float(patchBounds.pMin.y),
+                                float(patchBounds.pMin.z), 0.0f};
+            hiprtFloat4 aabbMax{float(patchBounds.pMax.x), float(patchBounds.pMax.y),
+                                float(patchBounds.pMax.z), 0.0f};
             aabbBuffer[2 * aabbIndex + 0] = aabbMin;
             aabbBuffer[2 * aabbIndex + 1] = aabbMax;
             ++aabbIndex;
@@ -1290,12 +1300,10 @@ HiprtAggregate::GeometryContainer HiprtAggregate::buildBVHForQuadrics(
         Shape shape = shapes[0];
 
         Bounds3f shapeBounds = shape.Bounds();
-        hiprtFloat4 aabbMin =
-            make_hiprtFloat4(float(shapeBounds.pMin.x), float(shapeBounds.pMin.y),
-                             float(shapeBounds.pMin.z), 0.0f);
-        hiprtFloat4 aabbMax =
-            make_hiprtFloat4(float(shapeBounds.pMax.x), float(shapeBounds.pMax.y),
-                             float(shapeBounds.pMax.z), 0.0f);
+        hiprtFloat4 aabbMin{float(shapeBounds.pMin.x), float(shapeBounds.pMin.y),
+                            float(shapeBounds.pMin.z), 0.0f};
+        hiprtFloat4 aabbMax{float(shapeBounds.pMax.x), float(shapeBounds.pMax.y),
+                            float(shapeBounds.pMax.z), 0.0f};
         aabbBuffer[2 * quadricIndex + 0] = aabbMin;
         aabbBuffer[2 * quadricIndex + 1] = aabbMax;
 
@@ -1458,12 +1466,14 @@ static void loadFile(const std::string& path, std::vector<char> &dst) {
 }
 
 HiprtAggregate::Module HiprtAggregate::compileHiprtModule(hiprtContext context) {
+    const std::string pbrt_directory = get_pbrt_directory();
     const std::string path = "../src/pbrt/gpu/hiprt/hiprt.cu";
     const std::string closestFunction = "__raygen__findClosest";
     const std::string shadowFunction = "__raygen__shadow";
     const std::string shadowTrFunction = "__raygen__shadow_Tr";
     const std::string oneRandomFunction = "__raygen__randomHit";
-    const std::string binFilename = "hiprt.hipfb";
+    // The hiprt.hipfb file needs to be stored next to the pbrt executable
+    const std::string binFilename = pbrt_directory + "/" + "hiprt.hipfb";
 
     std::vector<char> binary;
     loadFile(binFilename, binary);
