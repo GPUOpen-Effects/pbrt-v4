@@ -22,7 +22,6 @@ list(INSERT CMAKE_MODULE_PATH 0 "${CMAKE_SOURCE_DIR}/cmake")
 # Configuration options
 
 option(PBRT_HIPRT "Use HIPRT as backend" OFF)
-set(PBRT_ROCM_VERSION "7.1" CACHE STRING "ROCM version (e.g., 7.1)")
 option(PBRT_FLOAT_AS_DOUBLE "Use 64-bit floats" OFF)
 option(PBRT_BUILD_NATIVE_EXECUTABLE "Build executable optimized for CPU architecture of system pbrt was built on" ON)
 option(PBRT_DBG_LOGGING "Enable (very verbose!) debug logging" OFF)
@@ -987,6 +986,9 @@ if(PBRT_CUDA_ENABLED)
 endif()
 
 if(PBRT_HIP_ENABLED)
+  # hiprt.sh/hiprt.bat compile the HIPRT kernels for the same GPUs as the rest of pbrt
+  list(TRANSFORM GPU_TARGETS PREPEND "--offload-arch=" OUTPUT_VARIABLE PBRT_HIPRT_OFFLOAD_ARCHS)
+  list(JOIN PBRT_HIPRT_OFFLOAD_ARCHS " " PBRT_HIPRT_OFFLOAD_ARCHS)
   if(WIN32)
     configure_file(scripts/hiprt.bat.in ${CMAKE_CURRENT_BINARY_DIR}/hiprt.bat @ONLY)
   else()

@@ -264,6 +264,6 @@ Add `--interactive` for interactive mode.
 GPU architecture and ROCm version
 --------
 
-The instructions above assume the `gfx1100` architecture. You can specify other architectures via the CMake `AMDGPU_TARGETS` variable. You also need to change the architecture in `hiprt.sh` and `hiprt.bat`. 
+The instructions above assume the `gfx1100` architecture. You can specify other architectures via the CMake `AMDGPU_TARGETS` variable; CMake generates `hiprt.sh` and `hiprt.bat` in the build directory for the same architectures. 
 Note that PBRT must be compiled with the same HIP SDK as HIPRT. The HIPRT bitcode (e.g., `hiprt03002_6.4_amd_lib_linux.bc`) is picked up from `src/ext/hiprt/dist/bin/Release` automatically.
 
